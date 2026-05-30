@@ -1,0 +1,14 @@
+[package]
+name = "strand-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "CLI for strand-core (desktop GUI via Tauri can wrap this crate later)"
+
+[[bin]]
+name = "strand-desktop"
+path = "src/main.rs"
+
+[dependencies]
+strand-core = { path = "../core" }
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
