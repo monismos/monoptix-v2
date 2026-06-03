@@ -47,58 +47,39 @@ static uint64_t* build_byte_offset_map(const uint64_t* insn_offset_map, uint32_t
     return byte_map;
 }
 
-// Adjust relocation entry using byte-level offset map
+// Adjust relocation entry using byte-level offset map.
+// text_vaddr is the virtual address of the .text section (for PIE, this is
+// non-zero even though the binary is relocatable).  r_offset is relative to
+// the same base, so we subtract text_vaddr to get the byte-map index.
 static int adjust_relocation_entry(Elf64_Rela* rela, const uint64_t* byte_map,
-                                   uint64_t old_text_size, uint64_t new_text_size) {
+                                   uint64_t text_vaddr, uint64_t old_text_size) {
     uint64_t r_offset = rela->r_offset;
-    uint32_t r_type = ELF64_R_TYPE(rela->r_info);
-    
-    // Check if relocation is in .text section
-    if (r_offset < old_text_size && byte_map) {
-        // Map to new offset
-        if (byte_map[r_offset] != UINT64_MAX) {
-            uint64_t new_offset = byte_map[r_offset];
-            rela->r_offset = new_offset;
-        }
-        // If byte was eliminated, keep original offset (may cause issues)
+
+    if (!byte_map) return 0;
+
+    // Relocation must be within .text virtual range
+    if (r_offset < text_vaddr || r_offset >= text_vaddr + old_text_size)
+        return 0;
+
+    uint64_t idx = r_offset - text_vaddr;
+    if (idx < old_text_size && byte_map[idx] != UINT64_MAX) {
+        rela->r_offset = text_vaddr + byte_map[idx];
     }
-    
-    // Adjust based on relocation type
-    switch (r_type) {
-        case R_X86_64_64:
-            // 64-bit absolute - offset adjustment is sufficient
-            break;
-        case R_X86_64_PC32:
-        case R_X86_64_PLT32:
-            // PC-relative - may need addend adjustment if target moved
-            // For now, offset adjustment is sufficient
-            break;
-        case R_X86_64_32:
-        case R_X86_64_32S:
-            // 32-bit absolute - offset adjustment is sufficient
-            break;
-        case R_X86_64_GOTPCREL:
-            // GOT PC-relative - offset adjustment is sufficient
-            break;
-        default:
-            // Unknown type - leave as-is
-            break;
-    }
-    
+
     return 0;
 }
 
 // Adjust all relocations in a relocation section
 static int adjust_relocation_section(uint8_t* elf_buffer, uint64_t rela_offset,
                                    uint64_t rela_size, const uint64_t* byte_map,
-                                   uint64_t old_text_size, uint64_t new_text_size) {
+                                   uint64_t text_vaddr, uint64_t old_text_size) {
     uint64_t n_relocs = rela_size / sizeof(Elf64_Rela);
     Elf64_Rela* relas = (Elf64_Rela*)(elf_buffer + rela_offset);
-    
+
     for (uint64_t i = 0; i < n_relocs; i++) {
-        adjust_relocation_entry(&relas[i], byte_map, old_text_size, new_text_size);
+        adjust_relocation_entry(&relas[i], byte_map, text_vaddr, old_text_size);
     }
-    
+
     return 0;
 }
 
@@ -128,16 +109,24 @@ int bine_adjust_relocations(uint8_t* elf_buffer, uint64_t elf_size,
         shstrtab = (char*)(elf_buffer + shdrs[ehdr->e_shstrndx].sh_offset);
     }
     
-    // Iterate through sections to find .rela.* sections
+    // Find .text section virtual address (sh_addr) for relocation mapping
+    uint64_t text_vaddr = 0;
     for (uint16_t i = 0; i < ehdr->e_shnum; i++) {
         const char* name = shstrtab ? shstrtab + shdrs[i].sh_name : "";
-        
+        if (strcmp(name, ".text") == 0) {
+            text_vaddr = shdrs[i].sh_addr;
+            break;
+        }
+    }
+    
+    // Iterate through sections to find .rela.* sections
+    for (uint16_t i = 0; i < ehdr->e_shnum; i++) {
         // Check if this is a relocation section
         if (shdrs[i].sh_type == SHT_RELA) {
             // Adjust this relocation section
             if (adjust_relocation_section(elf_buffer, shdrs[i].sh_offset,
                                         shdrs[i].sh_size, byte_map,
-                                        old_text_size, new_text_size) < 0) {
+                                        text_vaddr, old_text_size) < 0) {
                 free(byte_map);
                 return -1;
             }

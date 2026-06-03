@@ -66,6 +66,22 @@ static int serialize_net_to_text(const uint64_t* net, uint32_t n_agents,
         return 0;
     }
 
+    // Safety: if decoder didn't cover all bytes, fall back to original
+    uint64_t decoded_end = (n_insns > 0) ? insns[n_insns-1].offset + insns[n_insns-1].length : 0;
+    if (decoded_end < original->text_size) {
+        fprintf(stderr, "[BINE-SERIALIZE] Decoder covered %lu/%lu bytes, falling back to original\n",
+                decoded_end, original->text_size);
+        *text_size_out = original->text_size;
+        *text_out = (uint8_t*)malloc(original->text_size);
+        if (!*text_out) { free_instructions(insns); return -1; }
+        memcpy(*text_out, original->text_bytes, original->text_size);
+        free_instructions(insns);
+        *offset_map_out = NULL;
+        *insns_out = NULL;
+        *n_insns_out = 0;
+        return 0;
+    }
+
     // Count non-ERA agents
     uint32_t live_agents = 0;
     for (uint32_t i = 0; i < n_agents; i++) {

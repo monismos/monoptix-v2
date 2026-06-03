@@ -359,6 +359,19 @@ int bine_peephole_optimize(uint8_t* text, uint64_t text_size, uint64_t* new_size
         return 0;
     }
 
+    // Safety: if decoder didn't cover all bytes, skip peephole to avoid
+    // corrupting instructions we can't correctly identify
+    if (n_insns > 0) {
+        uint64_t decoded_end = insns[n_insns - 1].offset + insns[n_insns - 1].length;
+        if (decoded_end < text_size) {
+            fprintf(stderr, "[BINE-PEEPHOLE] Decoder covered %lu/%lu bytes, skipping peephole\n",
+                    decoded_end, text_size);
+            free_instructions(insns);
+            if (new_size_out) *new_size_out = text_size;
+            return 0;
+        }
+    }
+
     // Build branch target set
     bool* branch_targets = build_branch_target_set(insns, n_insns, text_size);
 

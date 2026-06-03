@@ -293,6 +293,16 @@ static uint32_t decode_instruction(const uint8_t* bytes, uint64_t offset, uint64
                 len++;
                 
                 switch (opcode2) {
+                    case 0x1F: // Multi-byte NOP (0F 1F xx)
+                        insn->has_modrm = true;
+                        {
+                            uint8_t reg_out, rm_out, disp_size;
+                            uint32_t modrm_len = decode_modrm_sib(bytes, pos, rex, &reg_out, &rm_out, &disp_size);
+                            insn->modrm = bytes[pos];
+                            len += modrm_len + disp_size;
+                        }
+                        break;
+                    
                     case 0x80: case 0x81: case 0x82: case 0x83: // Jcc rel32
                     case 0x84: case 0x85: case 0x86: case 0x87:
                     case 0x88: case 0x89: case 0x8A: case 0x8B:
@@ -326,6 +336,16 @@ static uint32_t decode_instruction(const uint8_t* bytes, uint64_t offset, uint64
                             insn->modrm = bytes[pos];
                             insn->reg = reg_out;
                             insn->rm = rm_out;
+                            len += modrm_len + disp_size;
+                        }
+                        break;
+                    
+                    default: // Most two-byte opcodes have ModRM
+                        insn->has_modrm = true;
+                        {
+                            uint8_t reg_out, rm_out, disp_size;
+                            uint32_t modrm_len = decode_modrm_sib(bytes, pos, rex, &reg_out, &rm_out, &disp_size);
+                            insn->modrm = bytes[pos];
                             len += modrm_len + disp_size;
                         }
                         break;

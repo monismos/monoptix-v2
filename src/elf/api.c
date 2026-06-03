@@ -99,17 +99,14 @@ int bine_optimize(const char* input_path, const char* output_path) {
     uint64_t stage2_time = get_time_ms();
     
     // Stage 2.5: Peephole optimization on raw .text bytes
-    // Runs before net construction to clean up the instruction stream:
-    // eliminates redundant MOVs, dead PUSH/POP pairs, dead register loads,
-    // and consolidates scattered NOPs into optimal multi-byte NOPs.
-    {
-        uint64_t peep_new_size = 0;
-        int peep_rc = bine_peephole_optimize(bin->text_bytes, bin->text_size, &peep_new_size);
-        if (peep_rc == 0) {
-            fprintf(stderr, "[BINE-PEEPHOLE] Peephole pass complete on %lu byte .text\n",
-                    bin->text_size);
-        }
-    }
+    // DISABLED: The x86-64 instruction decoder can mis-identify boundaries
+    // for instructions it doesn't fully handle (many SSE/AVX, segment
+    // overrides, etc.).  Even when the total decoded length matches
+    // text_size, individual instruction lengths can be wrong, causing the
+    // peephole to NOP live code.  Re-enable after the decoder is made
+    // complete or a formal length verifier is added.
+    //
+    // bine_peephole_optimize(bin->text_bytes, bin->text_size, &peep_new_size);
     uint64_t stage2b_time = get_time_ms();
     
     // Stage 3: Build interaction net
