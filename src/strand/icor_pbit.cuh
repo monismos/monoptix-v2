@@ -7,7 +7,7 @@
 #include "rules.cuh"
 #include "compact.cuh"
 #include <cuda_runtime.h>
-#include <curand_kernel.h>
+#include "rng.cuh"
 #include <cstdint>
 
 // Find pairs kernel - same as deterministic version
@@ -32,7 +32,7 @@ __global__ void k_apply_rules_pbit(
     uint64_t* __restrict__ out_pairs,
     uint32_t* __restrict__ out_count,
     float                  temperature,
-    curandState*           rng)
+    uint64_t               rng_seed)
 {
     uint32_t tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= pair_count) return;
@@ -48,12 +48,10 @@ __global__ void k_apply_rules_pbit(
     if (WORD_DEAD(wa) || WORD_DEAD(wb)) return;
     if (!WORD_AP(wa)) return;
 
-    // P-bit decision: apply rule with probability based on temperature and rule type
-    curandState local_rng = rng[tid];
+    // SplitMix64 RNG
+    uint64_t rng = splitmix64_seed(rng_seed, tid);
     
     // Compute energy contribution of this pair
-    // ERA pairs reduce agent count (negative energy = good)
-    // CON/DUP expansions increase agent count (positive energy = bad)
     uint8_t ta = WORD_TYPE(wa);
     uint8_t tb = WORD_TYPE(wb);
     
@@ -69,20 +67,15 @@ __global__ void k_apply_rules_pbit(
     }
     
     // Metropolis acceptance criterion
-    // Accept if energy_change < 0, or with probability exp(-energy_change / temperature)
     float accept_prob = 1.0f;
     if (energy_change > 0.0f) {
         accept_prob = expf(-energy_change / temperature);
     }
     
-    float r = curand_uniform(&local_rng);
+    float r = splitmix64_uniform(&rng);
     if (r > accept_prob) {
-        // Reject: don't apply this rule
-        rng[tid] = local_rng;
-        return;
+        return; // Reject
     }
-    
-    rng[tid] = local_rng;
 
     // Clear AP bits
     atomicAnd((unsigned long long*)(net + a), ~0x2ULL);
@@ -129,11 +122,8 @@ void icor_reduce_pbit(uint64_t* d_net, uint32_t* d_alloc_head,
     cudaMalloc(&d_count_A, sizeof(uint32_t));
     cudaMalloc(&d_count_B, sizeof(uint32_t));
 
-    // cuRAND states for p-bit decisions
-    curandState *d_rng;
-    cudaMalloc(&d_rng, n_agents * sizeof(curandState));
-    k_init_rng<<<(n_agents + 255) / 256, 256>>>(d_rng, 42ULL, n_agents);
-    cudaDeviceSynchronize();
+    // Deterministic seed for SplitMix64 RNG (no cuRAND state needed)
+    uint64_t rng_seed = 0x9e3779b97f4a7c15ull; // golden ratio hash
 
     uint32_t grid_agents = (n_agents + 255) / 256;
 
@@ -167,7 +157,7 @@ void icor_reduce_pbit(uint64_t* d_net, uint32_t* d_alloc_head,
         uint32_t grid_pairs = (active + 127) / 128;
         k_apply_rules_pbit<<<grid_pairs, 128>>>(
             d_net, d_pairs_A, active, d_alloc_head, d_pairs_B, d_count_B,
-            temperature, d_rng);
+            temperature, rng_seed + round);
         cudaDeviceSynchronize();
 
         // Ping-pong
@@ -206,7 +196,6 @@ void icor_reduce_pbit(uint64_t* d_net, uint32_t* d_alloc_head,
     cudaFree(d_pairs_B);
     cudaFree(d_count_A);
     cudaFree(d_count_B);
-    cudaFree(d_rng);
 }
 
 #endif // ICOR_PBIT_CUH

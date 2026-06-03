@@ -166,6 +166,9 @@ int bine_adjust_relocations(uint8_t* elf_buffer, uint64_t elf_size,
                             const uint64_t* offset_map, uint32_t n_insns,
                             const Instruction* insns);
 int bine_peephole_optimize(uint8_t* text, uint64_t text_size, uint64_t* new_size_out);
+uint32_t x86_64_insn_length(const uint8_t* p, uint32_t max_len);
+Instruction* decode_instructions_safe(const uint8_t* text, uint64_t text_size,
+                                       uint32_t* n_insns);
 int bine_compact_elf(const char* elf_path, const char* output_path);
 uint32_t* bine_assign_registers(const uint64_t* net, uint32_t n_agents,
                                 const BinaryIntrinsic* bin, uint32_t* n_assigned);

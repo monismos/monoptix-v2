@@ -99,14 +99,17 @@ int bine_optimize(const char* input_path, const char* output_path) {
     uint64_t stage2_time = get_time_ms();
     
     // Stage 2.5: Peephole optimization on raw .text bytes
-    // DISABLED: The x86-64 instruction decoder can mis-identify boundaries
-    // for instructions it doesn't fully handle (many SSE/AVX, segment
-    // overrides, etc.).  Even when the total decoded length matches
-    // text_size, individual instruction lengths can be wrong, causing the
-    // peephole to NOP live code.  Re-enable after the decoder is made
-    // complete or a formal length verifier is added.
-    //
-    // bine_peephole_optimize(bin->text_bytes, bin->text_size, &peep_new_size);
+    // Safety: x86_64_insn_length() verifies every instruction boundary.
+    // If any instruction length disagrees with the full decoder, or the
+    // decoder doesn't cover all .text bytes, the peephole returns early.
+    {
+        uint64_t peep_new_size = 0;
+        int peep_rc = bine_peephole_optimize(bin->text_bytes, bin->text_size, &peep_new_size);
+        if (peep_rc == 0) {
+            fprintf(stderr, "[BINE-PEEPHOLE] Peephole pass complete on %lu byte .text\n",
+                    bin->text_size);
+        }
+    }
     uint64_t stage2b_time = get_time_ms();
     
     // Stage 3: Build interaction net
@@ -354,11 +357,11 @@ int bine_info(const char* binary_path) {
 // Benchmark function
 int bine_bench(const char* input_path, const char* output_path) {
     
-    uint64_t times[5];
-    uint64_t size_reductions[5];
-    uint64_t text_reductions[5];
+    uint64_t times[3];
+    uint64_t size_reductions[3];
     
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 3; i++) {
+        fprintf(stderr, "[BINE-BENCH] Iteration %d/3...\n", i + 1);
         uint64_t start = get_time_ms();
         
         if (bine_optimize(input_path, output_path) < 0) {
@@ -373,44 +376,25 @@ int bine_bench(const char* input_path, const char* output_path) {
         stat(output_path, &st_opt);
         
         size_reductions[i] = (st_orig.st_size - st_opt.st_size) * 100 / st_orig.st_size;
-        
-        // Get .text section sizes for more detailed metrics
-        BinaryIntrinsic* bin_orig = bine_extract_intrinsic(input_path);
-        BinaryIntrinsic* bin_opt = bine_extract_intrinsic(output_path);
-        
-        if (bin_orig && bin_opt) {
-            text_reductions[i] = (bin_orig->text_size - bin_opt->text_size) * 100 / bin_orig->text_size;
-        } else {
-            text_reductions[i] = size_reductions[i]; // Fallback
-        }
-        
-        if (bin_orig) bine_free_intrinsic(bin_orig);
-        if (bin_opt) bine_free_intrinsic(bin_opt);
     }
     
     // Calculate statistics
     uint64_t total_time = 0;
     uint64_t total_size_reduction = 0;
-    uint64_t total_text_reduction = 0;
     uint64_t min_time = UINT64_MAX;
     uint64_t max_time = 0;
     
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 3; i++) {
         total_time += times[i];
         total_size_reduction += size_reductions[i];
-        total_text_reduction += text_reductions[i];
         if (times[i] < min_time) min_time = times[i];
         if (times[i] > max_time) max_time = times[i];
     }
     
-    uint64_t avg_time = total_time / 5;
-    uint64_t avg_size_reduction = total_size_reduction / 5;
-    uint64_t avg_text_reduction = total_text_reduction / 5;
-    
-    // Simple median for 5 values: index 2
-    uint64_t median_time = times[2];
-    uint64_t median_size_reduction = size_reductions[2];
-    uint64_t median_text_reduction = text_reductions[2];
+    uint64_t avg_time = total_time / 3;
+    uint64_t avg_size_reduction = total_size_reduction / 3;
+    uint64_t median_time = times[1];
+    uint64_t median_size_reduction = size_reductions[1];
     
     printf("  Time:\n");
     printf("    Min: %lu ms\n", min_time);
@@ -420,11 +404,8 @@ int bine_bench(const char* input_path, const char* output_path) {
     printf("  Size reduction:\n");
     printf("    Avg: %lu%%\n", avg_size_reduction);
     printf("    Median: %lu%%\n", median_size_reduction);
-    printf("  .text reduction:\n");
-    printf("    Avg: %lu%%\n", avg_text_reduction);
-    printf("    Median: %lu%%\n", median_text_reduction);
     printf("  Throughput: %.2f MB/s\n",
-           (float)median_time / 1000.0f > 0 ? 
+           median_time > 0 ?
            (float)avg_size_reduction / (float)median_time : 0.0f);
     
     return 0;

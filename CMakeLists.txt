@@ -35,6 +35,7 @@ set(BINE_SOURCES
     src/elf/api.c
     src/binary/decode.c
     src/binary/entropy.c
+    src/binary/length.c
     src/binary/pattern.c
     src/grammar/apex.c
     src/grammar/repair.c
@@ -94,6 +95,7 @@ add_executable(test_pipeline
     src/cache.c
     src/binary/decode.c
     src/binary/entropy.c
+    src/binary/length.c
     src/binary/pattern.c
     src/grammar/apex.c
     src/grammar/repair.c

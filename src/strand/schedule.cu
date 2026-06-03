@@ -8,11 +8,11 @@
 #include <math.h>
 
 // External p-bit state machine functions
-extern void strand_p_init_pbits(PBitState* d_pbits, int n, float initial_temp);
+extern void strand_p_init_pbits(PBitState* d_pbits, int n, float initial_temp, uint64_t seed);
 extern void strand_p_calculate_field(const float* d_couplings, const float* d_biases,
                                       const float* d_spins, float* d_local_field, int n);
 extern void strand_p_update_pbits(PBitState* d_pbits, const float* d_local_field,
-                                  float* d_spins, int n, float current_temp);
+                                  float* d_spins, int n, float current_temp, uint64_t seed);
 extern float strand_p_calculate_energy(const float* d_couplings, const float* d_biases,
                                        const float* d_spins, int n);
 extern void strand_p_anneal_temperature(PBitState* d_pbits, int n,
@@ -65,7 +65,7 @@ int strand_p_init(STRANDPScheduler* scheduler, int n_instructions,
     cudaMalloc(&scheduler->d_energy_history, 100 * sizeof(float));
     
     // Initialize p-bits
-    strand_p_init_pbits(scheduler->d_pbits, n_instructions, scheduler->temp_start);
+    strand_p_init_pbits(scheduler->d_pbits, n_instructions, scheduler->temp_start, 0x9e3779b97f4a7c15ull);
     
     // Build coupling matrix from dependency analysis
     // J[i][j] > 0 if instruction i must come before j (antiferromagnetic)
@@ -129,7 +129,8 @@ int strand_p_optimize(STRANDPScheduler* scheduler, uint32_t* schedule_order) {
         
         // Update p-bits
         strand_p_update_pbits(scheduler->d_pbits, scheduler->d_local_field,
-                              scheduler->d_spins, scheduler->n_spins, current_temp);
+                              scheduler->d_spins, scheduler->n_spins, current_temp,
+                              0x9e3779b97f4a7c15ull + (uint64_t)iter);
         
         // Calculate energy
         float energy = strand_p_calculate_energy(scheduler->d_couplings, scheduler->d_biases,

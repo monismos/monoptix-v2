@@ -3,7 +3,7 @@
 
 #include "bine.h"
 #include <cuda_runtime.h>
-#include <curand_kernel.h>
+#include "rng.cuh"
 
 // Ising model coupling matrix
 struct IsingModel {
@@ -14,13 +14,12 @@ struct IsingModel {
 };
 
 // Initialize p-bit states
-__global__ void init_pbits_kernel(PBitState* pbits, int n, float initial_temp) {
+__global__ void init_pbits_kernel(PBitState* pbits, int n, float initial_temp,
+                                   uint64_t seed) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) {
-        curandStatePhilox4_32_10_t state;
-        curand_init(clock64(), idx, 0, &state);
-        
-        pbits[idx].value = curand_uniform(&state) > 0.5f ? 1.0f : -1.0f;
+        uint64_t rng = splitmix64_seed(seed, idx);
+        pbits[idx].value = splitmix64_uniform(&rng) > 0.5f ? 1.0f : -1.0f;
         pbits[idx].temperature = initial_temp;
         pbits[idx].bias = 0.0f;
         pbits[idx].seed = idx;
@@ -50,11 +49,11 @@ __global__ void calculate_local_field_kernel(const float* couplings, const float
 // Update p-bit state using Boltzmann distribution
 // P(s_i = +1) = 1 / (1 + exp(-2 * H_i / T))
 __global__ void update_pbits_kernel(PBitState* pbits, const float* local_field,
-                                     float* spins, int n, float current_temp) {
+                                     float* spins, int n, float current_temp,
+                                     uint64_t seed) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) {
-        curandStatePhilox4_32_10_t state;
-        curand_init(clock64(), pbits[idx].seed, 0, &state);
+        uint64_t rng = splitmix64_seed(seed, idx + n);
         
         float H = local_field[idx];
         float T = current_temp;
@@ -66,7 +65,7 @@ __global__ void update_pbits_kernel(PBitState* pbits, const float* local_field,
         float prob_up = 1.0f / (1.0f + expf(-2.0f * H / T));
         
         // Sample from distribution
-        float rand_val = curand_uniform(&state);
+        float rand_val = splitmix64_uniform(&rng);
         int new_spin = (rand_val < prob_up) ? 1 : -1;
         
         // Update state
@@ -148,10 +147,10 @@ __global__ void detect_stall_kernel(const float* energy_history, int history_len
 }
 
 // CUDA interface functions
-void strand_p_init_pbits(PBitState* d_pbits, int n, float initial_temp) {
+void strand_p_init_pbits(PBitState* d_pbits, int n, float initial_temp, uint64_t seed) {
     int threads = 256;
     int blocks = (n + threads - 1) / threads;
-    init_pbits_kernel<<<blocks, threads>>>(d_pbits, n, initial_temp);
+    init_pbits_kernel<<<blocks, threads>>>(d_pbits, n, initial_temp, seed);
     cudaDeviceSynchronize();
 }
 
@@ -165,10 +164,11 @@ void strand_p_calculate_field(const float* d_couplings, const float* d_biases,
 }
 
 void strand_p_update_pbits(PBitState* d_pbits, const float* d_local_field,
-                            float* d_spins, int n, float current_temp) {
+                            float* d_spins, int n, float current_temp,
+                            uint64_t seed) {
     int threads = 256;
     int blocks = (n + threads - 1) / threads;
-    update_pbits_kernel<<<blocks, threads>>>(d_pbits, d_local_field, d_spins, n, current_temp);
+    update_pbits_kernel<<<blocks, threads>>>(d_pbits, d_local_field, d_spins, n, current_temp, seed);
     cudaDeviceSynchronize();
 }
 

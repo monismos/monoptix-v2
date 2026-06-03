@@ -5,11 +5,11 @@
 #ifndef PBITS_CUH
 #define PBITS_CUH
 
-#include <curand_kernel.h>
 #include "bits.cuh"
 #include <cuda_runtime.h>
 #include <cstdint>
 #include <cstdlib>
+#include "rng.cuh"
 
 #define MAX_CONF 6        // max conflicts per pair (3 ports × 2 sides)
 #define PBIT_STEPS  10    // Boltzmann steps per beta level
@@ -88,12 +88,12 @@ __global__ void k_pbit_update(
     uint8_t  *rule_bias,  // in:     per-pair bias: 2=ERA,1=other
     uint32_t  n_pairs,
     float     beta,
-    curandState *rng)
+    uint64_t  rng_seed)
 {
     uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n_pairs) return;
 
-    curandState lcl = rng[i];
+    uint64_t rng = splitmix64_seed(rng_seed, i);
 
     // Bias: ERA pairs (annihilate → prefer inclusion) get extra +0.5
     float I = (rule_bias[i] == 2) ? 1.5f : 1.0f;
@@ -102,10 +102,8 @@ __global__ void k_pbit_update(
     for (uint8_t k = 0; k < nc; k++)
         I -= (float)s[conf_adj[i * MAX_CONF + k]];
 
-    float r = curand_uniform(&lcl) * 2.0f - 1.0f;
+    float r = splitmix64_uniform(&rng) * 2.0f - 1.0f;
     s[i] = (tanhf(beta * I) + r > 0.0f) ? (int8_t)1 : (int8_t)-1;
-
-    rng[i] = lcl;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -127,13 +125,8 @@ __global__ void k_rule_bias(
 }
 
 // ────────────────────────────────────────────────────────────────
-// PHASE 5 — Initialize cuRAND states
+// PHASE 5 — No cuRAND init needed (SplitMix64 is stateless per-call)
 // ────────────────────────────────────────────────────────────────
-__global__ void k_init_rng(curandState *rng, unsigned long long seed, uint32_t n) {
-    uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
-    curand_init(seed, i, 0, &rng[i]);
-}
 
 // ────────────────────────────────────────────────────────────────
 // PHASE 6 — Compact MIS output into a dense apply-list
@@ -189,7 +182,6 @@ uint32_t pbit_mis(
     uint32_t *d_pairs_a, uint32_t *d_pairs_b,
     uint64_t *d_net,
     uint32_t *d_pairs_a_out, uint32_t *d_pairs_b_out,
-    curandState *d_rng,
     uint32_t n_pairs, uint32_t n_agents)
 {
     if (n_pairs == 0) return 0;
@@ -229,11 +221,13 @@ uint32_t pbit_mis(
     cudaMemset(d_s, 1, n_pairs);
 
     // 6. Simulated annealing: β from low (hot/random) → high (greedy/frozen)
+    // Deterministic seed for SplitMix64 (no cuRAND state needed)
+    uint64_t rng_seed = 0xbf58476d1ce4e5b9ull;
     for (int b = 0; b < (int)N_BETAS; b++) {
         for (int step = 0; step < PBIT_STEPS; step++) {
             k_pbit_update<<<BLOCKS(n_pairs), 256>>>(
                 d_s, d_conf_adj, d_conf_cnt, d_rule_bias,
-                n_pairs, BETA_SCHEDULE[b], d_rng);
+                n_pairs, BETA_SCHEDULE[b], rng_seed + (uint64_t)(b * PBIT_STEPS + step));
         }
     }
     cudaDeviceSynchronize();

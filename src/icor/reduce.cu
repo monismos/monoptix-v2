@@ -67,12 +67,6 @@ extern "C" void icor_reduce(uint64_t* d_net, uint32_t* d_alloc_head,
     cudaMalloc(&d_pairs_a_mis, n_agents * 4);
     cudaMalloc(&d_pairs_b_mis, n_agents * 4);
 
-    // cuRAND states for p-bit MIS
-    curandState *d_rng;
-    cudaMalloc(&d_rng, n_agents * sizeof(curandState));
-    k_init_rng<<<(n_agents + 255) / 256, 256>>>(d_rng, 42ULL, n_agents);
-    cudaDeviceSynchronize();
-
     uint32_t grid_agents = (n_agents + 255) / 256;
 
     // Round 0: find all initial active pairs
@@ -105,7 +99,7 @@ extern "C" void icor_reduce(uint64_t* d_net, uint32_t* d_alloc_head,
         uint32_t n_mis = pbit_mis(
             d_pairs_a, d_pairs_b, d_net,
             d_pairs_a_mis, d_pairs_b_mis,
-            d_rng, active, n_agents);
+            active, n_agents);
 
         // Apply rules only on MIS pairs (zero conflicts)
         cudaMemset(d_count_B, 0, 4);
@@ -161,5 +155,4 @@ extern "C" void icor_reduce(uint64_t* d_net, uint32_t* d_alloc_head,
     cudaFree(d_pairs_b);
     cudaFree(d_pairs_a_mis);
     cudaFree(d_pairs_b_mis);
-    cudaFree(d_rng);
 }
