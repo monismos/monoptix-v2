@@ -6,7 +6,22 @@ on:
   pull_request:
 
 jobs:
-  build:
+  build-cpu-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (CPU-only)
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBINE_CPU_ONLY=ON -DBINE_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --config Release -j 2
+
+      - name: Test
+        run: .\build\Release\bine_tests.exe
+
+  build-gpu-linux:
     runs-on: ubuntu-latest
     container:
       image: nvidia/cuda:13.2.1-devel-ubuntu24.04
@@ -26,4 +41,4 @@ jobs:
         run: cmake --build build -j$(nproc)
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ./build/bine_tests

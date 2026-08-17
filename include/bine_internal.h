@@ -1,10 +1,11 @@
-// bine/bine.h — BINE: Binary Interaction Net Executor
+// bine/bine_internal.h — BINE: Binary Interaction Net Executor
 // Raw Executable Superoptimization via Intrinsic Self-Description
 // Zero External Data — Zero Tradeoffs — Directly Executable Output
 
-#ifndef BINE_H
-#define BINE_H
+#ifndef BINE_INTERNAL_H
+#define BINE_INTERNAL_H
 
+#include "bine_compat.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -84,9 +85,9 @@ typedef struct {
 // ============================================================================
 
 typedef struct {
-    __uint128_t M_R;        // Read mask: bits that vary and correlate with reads
-    __uint128_t M_W;        // Write mask: bits that vary and correlate with writes
-    __uint128_t M_K;        // Kill mask: bits with high XOR variance (state-changing)
+    bine_u128   M_R;        // Read mask: bits that vary and correlate with reads
+    bine_u128   M_W;        // Write mask: bits that vary and correlate with writes
+    bine_u128   M_K;        // Kill mask: bits with high XOR variance (state-changing)
     float       theta_R;    // Read entropy threshold
     float       theta_W;    // Write entropy threshold
     float       theta_K;    // Kill variance threshold
@@ -195,17 +196,19 @@ void free_instructions(Instruction* insns);
 
 // GPU CFG construction
 typedef struct {
-    struct {
-        uint64_t start_insn;
-        uint64_t end_insn;
-        uint32_t kernel_id;
-        uint8_t is_entry;
-        uint8_t is_exit;
-        uint32_t* successors;
-        uint32_t n_succ;
-        uint32_t* predecessors;
-        uint32_t n_pred;
-    }* blocks;
+    uint64_t start_insn;
+    uint64_t end_insn;
+    uint32_t kernel_id;
+    uint8_t is_entry;
+    uint8_t is_exit;
+    uint32_t* successors;
+    uint32_t n_succ;
+    uint32_t* predecessors;
+    uint32_t n_pred;
+} GPUCFGBlock;
+
+typedef struct {
+    GPUCFGBlock* blocks;
     uint32_t n_blocks;
     uint32_t n_kernels;
     uint32_t* kernel_start;
@@ -217,18 +220,20 @@ int bine_gpu_analyze_reachability(const GPUCFG* cfg, bool* reachable);
 
 // GPU DFG construction
 typedef struct {
-    struct {
-        uint64_t insn_idx;
-        uint32_t kernel_id;
-        uint32_t* use_regs;
-        uint32_t* def_regs;
-        uint32_t n_use;
-        uint32_t n_def;
-        uint32_t* consumers;
-        uint32_t n_consumers;
-        uint32_t* producers;
-        uint32_t n_producers;
-    }* nodes;
+    uint64_t insn_idx;
+    uint32_t kernel_id;
+    uint32_t* use_regs;
+    uint32_t* def_regs;
+    uint32_t n_use;
+    uint32_t n_def;
+    uint32_t* consumers;
+    uint32_t n_consumers;
+    uint32_t* producers;
+    uint32_t n_producers;
+} GPUDFGNode;
+
+typedef struct {
+    GPUDFGNode* nodes;
     uint32_t n_nodes;
     uint32_t n_kernels;
     uint32_t* kernel_offsets;
@@ -239,19 +244,21 @@ void bine_free_gpu_dfg(GPUDFG* dfg);
 
 // GPU interaction net construction
 typedef struct {
-    struct {
-        uint64_t id;
-        uint8_t type;
-        uint32_t kernel_id;
-        uint64_t insn_idx;
-        uint8_t essential;
-        uint8_t simt_aware;
-        uint32_t wire_0;
-        uint32_t wire_1;
-        uint32_t wire_2;
-        uint32_t consumers[8];
-        uint32_t n_consumers;
-    }* agents;
+    uint64_t id;
+    uint8_t type;
+    uint32_t kernel_id;
+    uint64_t insn_idx;
+    uint8_t essential;
+    uint8_t simt_aware;
+    uint32_t wire_0;
+    uint32_t wire_1;
+    uint32_t wire_2;
+    uint32_t consumers[8];
+    uint32_t n_consumers;
+} GPUAgent;
+
+typedef struct {
+    GPUAgent* agents;
     uint32_t n_agents;
     uint32_t n_kernels;
     uint32_t root_wire;
@@ -297,15 +304,49 @@ void bine_free_net(uint64_t* net);
 uint64_t* bine_icor_reduce(const uint64_t* net, uint32_t n_agents,
                           uint32_t* n_reduced, uint32_t* rounds);
 
-// Stage 5: STRAND-P joint optimization
-uint64_t* bine_strand_p_optimize(const uint64_t* net, uint32_t n_agents,
-                                 const StrandMasks* masks,
-                                 uint32_t* n_scheduled);
+// Stage 5: STRAND-P joint optimization (produces a schedule order; the net
+// itself is never renumbered — safe for the ELF pipeline)
+int bine_strand_p_optimize(const uint64_t* net, uint32_t n_agents,
+                           const StrandMasks* masks,
+                           uint32_t** out_order, uint32_t* n_scheduled);
 
 // Stage 6: Serialize net back to ELF
 int bine_serialize_elf(const uint64_t* net, uint32_t n_agents,
                       const BinaryIntrinsic* original,
                       const char* output_path);
+
+// Stage 6b: Serialize with a STRAND-P schedule order (offset-preserving
+// DCE + safe same-length reordering; schedule_order may be NULL).
+int bine_serialize_elf_ex(const uint64_t* net, uint32_t n_agents,
+                          const uint32_t* schedule_order, uint32_t n_scheduled,
+                          const BinaryIntrinsic* original,
+                          const char* output_path);
+
+// Slot-stable host ICOR reduction (ELF pipeline; never renumbers agents)
+int bine_icor_reduce_cpu(const uint64_t* net, uint32_t n_agents,
+                         uint64_t** out_net, uint32_t* n_out,
+                         uint32_t* rounds);
+// Is agent i a live (non-ERA, non-dead) instruction after reduction?
+int bine_icor_agent_live(const uint64_t* reduced, uint32_t n_reduced,
+                         uint32_t i);
+
+// Host STRAND-P scheduler: produces a schedule order (permutation of
+// 0..n-1, earlier = higher priority), never renumbers the net.
+int bine_strand_p_schedule_cpu(uint32_t n_instructions,
+                               const uint8_t* masks_r,
+                               const uint8_t* masks_w,
+                               const uint8_t* masks_k,
+                               uint32_t* schedule_order);
+
+// Offset-preserving layout engine (serialize/layout.c)
+uint8_t* bine_compute_dead_agents(const uint64_t* net, uint32_t n_agents,
+                                  const Instruction* insns, uint32_t n_insns,
+                                  const BinaryIntrinsic* bin);
+int bine_apply_layout(const uint64_t* net, uint32_t n_agents,
+                      const uint32_t* schedule_order, uint32_t n_scheduled,
+                      const BinaryIntrinsic* original,
+                      uint8_t* out, uint64_t* out_size,
+                      uint64_t** offset_map_out);
 
 // Instruction encoders
 uint32_t encode_agent_x86_64(uint64_t agent, uint32_t reg_assign, uint8_t* out);
@@ -322,6 +363,19 @@ uint32_t* bine_assign_registers(const uint64_t* net, uint32_t n_agents,
 
 Instruction* decode_instructions(const uint8_t* text, uint64_t text_size, uint32_t* n_insns);
 void free_instructions(Instruction* insns);
+
+// x86-64 length decoder (src/binary/length.c): exact instruction length at
+// p (0 on undecodable input).  Used for boundary-safe decoding.
+uint32_t x86_64_insn_length(const uint8_t* p, uint32_t max_len);
+
+// Boundary-safe decoder (src/binary/decode.c): length decoder drives the
+// instruction boundaries; semantic fields are filled where valid.
+Instruction* decode_instructions_safe(const uint8_t* text, uint64_t text_size,
+                                      uint32_t* n_insns);
+
+// NOP detection (src/binary/pattern.c): collects NOP instruction offsets.
+uint64_t detect_nops(const uint8_t* text, uint64_t text_size,
+                     uint64_t* nop_offsets, uint64_t max_nops);
 
 // BasicBlock structure for CFG
 typedef struct {
@@ -381,4 +435,4 @@ int bine_cache_store(uint64_t fingerprint, const uint64_t* net, uint32_t n_agent
 }
 #endif
 
-#endif // BINE_H
+#endif // BINE_INTERNAL_H

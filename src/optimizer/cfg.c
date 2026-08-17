@@ -92,47 +92,44 @@ bool* bine_analyze_reachability(const BasicBlock* cfg, uint32_t n_cfg,
         return NULL;
     }
 
-    // If the binary is stripped (no symbols), mark all basic blocks as reachable for safety
-    if (bin->n_symbols == 0 || !bin->symbols) {
-        memset(bb_reachable, 1, n_cfg * sizeof(bool));
-    } else {
-        // Compute entry point offset within .text section
-        uint64_t entry_offset = 0;
-        if (bin->text_vaddr != 0) {
-            entry_offset = bin->e_entry - bin->text_vaddr;
-        } else {
-            entry_offset = bin->e_entry - bin->load_vaddr;
+    // Reachability is seeded from the ELF entry point and from function
+    // symbols inside .text.  A valid entry is always required (falling back
+    // to the first instruction); we never mark everything reachable, or
+    // dead-code elimination could never fire on stripped binaries.
+    uint64_t entry_offset = 0;
+    if (bin->e_entry != 0) {
+        uint64_t base = (bin->text_vaddr != 0) ? bin->text_vaddr : bin->load_vaddr;
+        if (base != 0 && bin->e_entry >= base &&
+            bin->e_entry < base + bin->text_size) {
+            entry_offset = bin->e_entry - base;
         }
-        if (entry_offset >= bin->text_size) {
-            entry_offset = 0;
-        }
+    }
 
-        uint32_t entry_block = find_entry_block(cfg, n_cfg, entry_offset);
-        mark_reachable(cfg, n_cfg, bb_reachable, entry_block);
+    uint32_t entry_block = find_entry_block(cfg, n_cfg, entry_offset);
+    mark_reachable(cfg, n_cfg, bb_reachable, entry_block);
 
-        // Also mark all function/notype symbols within .text as reachable roots
-        for (uint32_t i = 0; i < bin->n_symbols; i++) {
-            const Symbol* sym = &bin->symbols[i];
-            // type 2 is STT_FUNC, type 0 is STT_NOTYPE
-            if (sym->type == 2 || sym->type == 0) {
-                uint64_t sym_offset = 0;
-                bool in_range = false;
-                if (bin->text_vaddr != 0) {
-                    if (sym->address >= bin->text_vaddr && sym->address < bin->text_vaddr + bin->text_size) {
-                        sym_offset = sym->address - bin->text_vaddr;
-                        in_range = true;
-                    }
-                } else {
-                    if (sym->address >= bin->load_vaddr && sym->address < bin->load_vaddr + bin->text_size) {
-                        sym_offset = sym->address - bin->load_vaddr;
-                        in_range = true;
-                    }
+    // Also mark all function/notype symbols within .text as reachable roots
+    for (uint32_t i = 0; i < bin->n_symbols; i++) {
+        const Symbol* sym = &bin->symbols[i];
+        // type 2 is STT_FUNC, type 0 is STT_NOTYPE
+        if (sym->type == 2 || sym->type == 0) {
+            uint64_t sym_offset = 0;
+            bool in_range = false;
+            if (bin->text_vaddr != 0) {
+                if (sym->address >= bin->text_vaddr && sym->address < bin->text_vaddr + bin->text_size) {
+                    sym_offset = sym->address - bin->text_vaddr;
+                    in_range = true;
                 }
-
-                if (in_range) {
-                    uint32_t sym_block = find_entry_block(cfg, n_cfg, sym_offset);
-                    mark_reachable(cfg, n_cfg, bb_reachable, sym_block);
+            } else {
+                if (sym->address >= bin->load_vaddr && sym->address < bin->load_vaddr + bin->text_size) {
+                    sym_offset = sym->address - bin->load_vaddr;
+                    in_range = true;
                 }
+            }
+
+            if (in_range) {
+                uint32_t sym_block = find_entry_block(cfg, n_cfg, sym_offset);
+                mark_reachable(cfg, n_cfg, bb_reachable, sym_block);
             }
         }
     }

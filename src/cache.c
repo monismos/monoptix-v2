@@ -8,9 +8,12 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>
-
-#define CACHE_DIR "/tmp/.bine_cache"
+#if defined(BINE_WINDOWS)
+#include <direct.h>
+#define BINE_MKDIR(p) _mkdir(p)
+#else
+#define BINE_MKDIR(p) mkdir(p, 0700)
+#endif
 
 typedef struct {
     uint64_t fingerprint;
@@ -31,9 +34,11 @@ static int cache_init() {
     if (!cache) return -1;
     
     // Create cache directory if it doesn't exist
+    static char cache_dir[1024];
+    snprintf(cache_dir, sizeof(cache_dir), "%s/cache", bine_state_dir());
     struct stat st;
-    if (stat(CACHE_DIR, &st) != 0) {
-        mkdir(CACHE_DIR, 0700);
+    if (stat(cache_dir, &st) != 0) {
+        BINE_MKDIR(cache_dir);
     }
     
     return 0;

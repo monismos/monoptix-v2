@@ -28,9 +28,11 @@ void entropy_scan(const uint8_t* data, uint64_t size, float* per_byte_entropy, f
 }
 
 void derive_masks_128(const uint8_t* data, uint64_t size,
-                      __uint128_t* M_R, __uint128_t* M_W, __uint128_t* M_K) {
-    __uint128_t read_mask = 0, write_mask = 0, kill_mask = 0;
-    if (size < 16) { *M_R = 0; *M_W = 0; *M_K = 0; return; }
+                      bine_u128* M_R, bine_u128* M_W, bine_u128* M_K) {
+    bine_u128 read_mask = bine_u128_from64(0);
+    bine_u128 write_mask = bine_u128_from64(0);
+    bine_u128 kill_mask = bine_u128_from64(0);
+    if (size < 16) { *M_R = read_mask; *M_W = write_mask; *M_K = kill_mask; return; }
     uint64_t n_words = size / 16;
     uint64_t ones[128] = {0};
     for (uint64_t w = 0; w < n_words; w++) {
@@ -43,12 +45,12 @@ void derive_masks_128(const uint8_t* data, uint64_t size,
     for (int b = 0; b < 128; b++) {
         uint64_t zeros = n_words - ones[b];
         if (ones[b] > 0 && zeros > 0) {
-            if (ones[b] <= zeros) read_mask |= ((__uint128_t)1 << b);
-            if (ones[b] >= zeros) write_mask |= ((__uint128_t)1 << b);
+            if (ones[b] <= zeros) read_mask = bine_u128_or(read_mask, bine_u128_shl(bine_u128_from64(1), (unsigned)b));
+            if (ones[b] >= zeros) write_mask = bine_u128_or(write_mask, bine_u128_shl(bine_u128_from64(1), (unsigned)b));
         }
     }
-    if (read_mask == 0) read_mask = ~(__uint128_t)0;
-    if (write_mask == 0) write_mask = ~(__uint128_t)0;
+    if (bine_u128_iszero(read_mask)) read_mask = bine_u128_not(read_mask);
+    if (bine_u128_iszero(write_mask)) write_mask = bine_u128_not(write_mask);
     for (uint64_t w = 1; w < n_words; w++) {
         for (int b = 0; b < 128; b++) {
             int byte_idx_a = ((w - 1) * 16) + (b / 8);
@@ -56,7 +58,7 @@ void derive_masks_128(const uint8_t* data, uint64_t size,
             int byte_idx_b = (w * 16) + (b / 8);
             uint8_t bit_a = (data[byte_idx_a] >> bit_idx) & 1;
             uint8_t bit_b = (data[byte_idx_b] >> bit_idx) & 1;
-            if (bit_a != bit_b) kill_mask |= ((__uint128_t)1 << b);
+            if (bit_a != bit_b) kill_mask = bine_u128_or(kill_mask, bine_u128_shl(bine_u128_from64(1), (unsigned)b));
         }
     }
     *M_R = read_mask; *M_W = write_mask; *M_K = kill_mask;

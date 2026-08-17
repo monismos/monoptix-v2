@@ -1,4 +1,4 @@
-// bine/net/gpu_cfg.c — GPU Control Flow Graph Construction
+// bine/net/gpu_cfg.c ??? GPU Control Flow Graph Construction
 // Builds CFG for GPU kernels (PTX-decoded instructions); SIMT-aware reachability is conservative
 // when branch targets cannot be resolved.
 
@@ -171,11 +171,11 @@ static void gpu_build_predecessors(GPUCFG* cfg) {
     }
 
     for (uint32_t i = 0; i < cfg->n_blocks; i++) {
-        typeof(cfg->blocks[0])* block = &cfg->blocks[i];
+        GPUCFGBlock* block = &cfg->blocks[i];
 
         uint32_t pred_count = 0;
         for (uint32_t j = 0; j < cfg->n_blocks; j++) {
-            typeof(cfg->blocks[0])* other = &cfg->blocks[j];
+            GPUCFGBlock* other = &cfg->blocks[j];
             for (uint32_t k = 0; k < other->n_succ; k++) {
                 if (other->successors[k] == i) pred_count++;
             }
@@ -187,7 +187,7 @@ static void gpu_build_predecessors(GPUCFG* cfg) {
             uint32_t pred_idx = 0;
 
             for (uint32_t j = 0; j < cfg->n_blocks; j++) {
-                typeof(cfg->blocks[0])* other = &cfg->blocks[j];
+                GPUCFGBlock* other = &cfg->blocks[j];
                 for (uint32_t k = 0; k < other->n_succ; k++) {
                     if (other->successors[k] == i) {
                         block->predecessors[pred_idx++] = j;
@@ -273,7 +273,7 @@ int bine_gpu_analyze_reachability(const GPUCFG* cfg, bool* reachable) {
 
     while (qh < qt) {
         uint32_t b = queue[qh++];
-        const typeof(cfg->blocks[0])* blk = &cfg->blocks[b];
+        const GPUCFGBlock* blk = &cfg->blocks[b];
         for (uint32_t si = 0; si < blk->n_succ; si++) {
             uint32_t s = blk->successors[si];
             if (s != UINT32_MAX && s < n && !reachable[s]) {
@@ -320,3 +320,4 @@ int bine_gpu_analyze_reachability(const GPUCFG* cfg, bool* reachable) {
     free(queue);
     return 0;
 }
+

@@ -7,14 +7,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Helper to extract low 64 bits from __uint128_t
-static uint64_t low128(__uint128_t x) {
-    return (uint64_t)x;
+// Helper to extract low 64 bits from bine_u128
+static uint64_t low128(bine_u128 x) {
+    return bine_u128_lo(x);
 }
 
-// Helper to extract high 64 bits from __uint128_t
-static uint64_t high128(__uint128_t x) {
-    return (uint64_t)(x >> 64);
+// Helper to extract high 64 bits from bine_u128
+static uint64_t high128(bine_u128 x) {
+    return bine_u128_hi(x);
 }
 
 // Compute Bernoulli entropy for a bit position
@@ -56,9 +56,9 @@ static float xor_variance(const uint8_t* text, uint64_t size, int bit_pos) {
 // Derive STRAND masks from bit entropy
 StrandMasks bine_derive_masks(const uint8_t* text, uint64_t size) {
     StrandMasks masks;
-    masks.M_R = 0;
-    masks.M_W = 0;
-    masks.M_K = 0;
+    masks.M_R = bine_u128_from64(0);
+    masks.M_W = bine_u128_from64(0);
+    masks.M_K = bine_u128_from64(0);
     
     if (size < 16 || (size % 16) != 0) {
         // Invalid instruction stream
@@ -161,15 +161,15 @@ StrandMasks bine_derive_masks(const uint8_t* text, uint64_t size) {
             
             if (b < 32) {
                 // Lower 32 bits often contain register fields
-                masks.M_R |= (1ULL << b);
+                masks.M_R = bine_u128_or(masks.M_R, bine_u128_shl(bine_u128_from64(1), (unsigned)b));
             } else if (b >= 32 && b < 64) {
                 // Middle bits often contain register fields
-                masks.M_W |= (1ULL << b);
+                masks.M_W = bine_u128_or(masks.M_W, bine_u128_shl(bine_u128_from64(1), (unsigned)b));
             }
         }
         
         if (variance[b] > masks.theta_K) {
-            masks.M_K |= (1ULL << b);
+            masks.M_K = bine_u128_or(masks.M_K, bine_u128_shl(bine_u128_from64(1), (unsigned)b));
         }
     }
     

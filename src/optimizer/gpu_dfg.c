@@ -1,4 +1,4 @@
-// bine/net/gpu_dfg.c — GPU Data Flow Graph Construction
+// bine/net/gpu_dfg.c ??? GPU Data Flow Graph Construction
 // Builds DFG for GPU kernels considering SIMT execution model
 
 #include "bine.h"
@@ -87,7 +87,7 @@ GPUDFG* bine_build_gpu_dfg(const GPUIntrinsic* gpu,
     
     // Build producer-consumer relationships
     for (uint32_t i = 0; i < n_insns; i++) {
-        typeof(*dfg->nodes) *node = &dfg->nodes[i];
+        GPUDFGNode* node = &dfg->nodes[i];
         
         // For each used register, find producer
         for (uint32_t j = 0; j < node->n_use; j++) {
@@ -147,3 +147,4 @@ void bine_free_gpu_dfg(GPUDFG* dfg) {
     free(dfg->kernel_offsets);
     free(dfg);
 }
+

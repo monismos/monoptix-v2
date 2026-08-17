@@ -1,4 +1,4 @@
-// bine/net/gpu_net.c — GPU Interaction Net Construction
+// bine/net/gpu_net.c ??? GPU Interaction Net Construction
 // Builds interaction nets from GPU instruction data for GPU-ICOR reduction
 
 #include "bine.h"
@@ -19,25 +19,12 @@ typedef enum {
     GPU_AGENT_ERA       // Dead code
 } GPUAgentType;
 
-// GPU interaction net agent
-typedef struct {
-    uint64_t id;
-    GPUAgentType type;
-    uint32_t kernel_id;
-    uint64_t insn_idx;
-    uint8_t essential;    // Cannot be eliminated
-    uint8_t simt_aware;   // Affects all threads
-    uint32_t wire_0;      // Primary input/output wire
-    uint32_t wire_1;      // Secondary input/output wire
-    uint32_t wire_2;      // Tertiary input/output wire
-    uint32_t consumers[8]; // Consumer agents
-    uint32_t n_consumers;
-} GPUAgent;
+// GPU interaction net agent (GPUAgent is defined in bine_internal.h)
 
 
 // Classify GPU instruction to agent type
 static GPUAgentType classify_gpu_insn(const Instruction* insn, 
-                                   const typeof(*((GPUDFG*)0)->nodes)* dfg_node,
+                                   const GPUDFGNode* dfg_node,
                                    bool reachable) {
     // Unreachable instructions become ERA
     if (!reachable) return GPU_AGENT_ERA;
@@ -134,7 +121,7 @@ GPUNet* bine_build_gpu_net(const GPUIntrinsic* gpu,
     
     // Build agents from instructions
     for (uint32_t i = 0; i < n_insns; i++) {
-        typeof(*net->agents) *agent = &net->agents[i];
+        GPUAgent* agent = &net->agents[i];
         const Instruction* insn = &insns[i];
         
         agent->id = i;
@@ -171,8 +158,8 @@ GPUNet* bine_build_gpu_net(const GPUIntrinsic* gpu,
     // Build consumer relationships from DFG
     if (dfg) {
         for (uint32_t i = 0; i < n_insns; i++) {
-            const typeof(*((GPUDFG*)0)->nodes)* dfg_node = &dfg->nodes[i];
-            typeof(*net->agents) *agent = &net->agents[i];
+            const GPUDFGNode* dfg_node = &dfg->nodes[i];
+            GPUAgent* agent = &net->agents[i];
             
             agent->n_consumers = dfg_node->n_consumers;
             for (uint32_t j = 0; j < dfg_node->n_consumers && j < 8; j++) {
@@ -193,7 +180,7 @@ GPUNet* bine_build_gpu_net(const GPUIntrinsic* gpu,
     }
     
     for (uint32_t i = 0; i < n_insns; i++) {
-        const typeof(*net->agents) *agent = &net->agents[i];
+        const GPUAgent* agent = &net->agents[i];
         
         if (agent->wire_0 < 1024) {
             net->wire_to_agent[agent->wire_0] = i;
@@ -245,7 +232,7 @@ uint64_t* bine_pack_gpu_net(const GPUNet* net, uint32_t* n_packed) {
     if (!packed) return NULL;
     
     for (uint32_t i = 0; i < net->n_agents; i++) {
-        const typeof(*net->agents) *agent = &net->agents[i];
+        const GPUAgent* agent = &net->agents[i];
         
         // Pack agent into 64 bits
         packed[i] = 0;
@@ -271,3 +258,4 @@ void bine_free_gpu_net(GPUNet* net) {
     free(net->wire_to_agent);
     free(net);
 }
+

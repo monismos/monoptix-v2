@@ -5,7 +5,6 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <stdio.h>
-#include <elf.h>
 
 // Wire interference graph node
 struct WireNode {

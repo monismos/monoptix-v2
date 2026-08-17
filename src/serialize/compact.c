@@ -4,15 +4,30 @@
 // to produce the smallest possible executable.
 
 #include "bine.h"
-#include <elf.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <sys/stat.h>
 #include <stdbool.h>
+#ifdef BINE_WINDOWS
+#include <io.h>
+#define read  _read
+#define write _write
+#define open  _open
+#define close _close
+typedef struct _stati64 bine_stat_t;
+#define bine_fstat _fstati64
+#define BINE_O_RDONLY (O_RDONLY | O_BINARY)
+#define BINE_O_WRONLY_CREAT_TRUNC (O_WRONLY | O_CREAT | O_TRUNC | O_BINARY)
+#else
+#include <unistd.h>
+typedef struct stat bine_stat_t;
+#define bine_fstat fstat
+#define BINE_O_RDONLY O_RDONLY
+#define BINE_O_WRONLY_CREAT_TRUNC (O_WRONLY | O_CREAT | O_TRUNC)
+#endif
 
 // Section names that are safe to strip (not needed at runtime)
 static const char* strippable_sections[] = {
@@ -123,11 +138,11 @@ int bine_compact_elf(const char* elf_path, const char* output_path) {
     if (!elf_path || !output_path) return -1;
 
     // Read input file
-    int fd = open(elf_path, O_RDONLY);
+    int fd = open(elf_path, BINE_O_RDONLY);
     if (fd < 0) return -1;
 
-    struct stat st;
-    if (fstat(fd, &st) < 0) { close(fd); return -1; }
+    bine_stat_t st;
+    if (bine_fstat(fd, &st) < 0) { close(fd); return -1; }
 
     uint64_t file_size = (uint64_t)st.st_size;
     uint8_t* buf = (uint8_t*)malloc(file_size);
@@ -272,7 +287,7 @@ int bine_compact_elf(const char* elf_path, const char* output_path) {
     // ========================================================================
     // Write output
     // ========================================================================
-    int out_fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+    int out_fd = open(output_path, BINE_O_WRONLY_CREAT_TRUNC, 0755);
     if (out_fd < 0) { free(buf); return -1; }
 
     if (write(out_fd, buf, new_size) != (ssize_t)new_size) {

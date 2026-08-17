@@ -2,17 +2,9 @@
 // Reads all ELF structures from the binary's own bytes. Zero external data.
 
 #include "bine.h"
-#include <elf.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
-#include <unistd.h>
-
-// ELF section header string table offset
-#define SHN_UNDEF 0
 
 // Helper: read 16-bit little-endian
 static uint16_t read16_le(const uint8_t* p) {
@@ -225,8 +217,9 @@ static int extract_needed_libs(const uint8_t* file_data, size_t file_size,
 // Extract build ID from .note.gnu.build-id
 static int extract_build_id(const uint8_t* file_data, size_t file_size,
                             const Elf64_Shdr* shdrs, uint32_t n_shdrs,
+                            const char* shstrtab,
                             uint8_t build_id[20], bool* has_build_id) {
-    const Elf64_Shdr* note_shdr = find_section(".note.gnu.build-id", shdrs, n_shdrs, "");
+    const Elf64_Shdr* note_shdr = find_section(".note.gnu.build-id", shdrs, n_shdrs, shstrtab);
     if (!note_shdr) {
         memset(build_id, 0, 20);
         *has_build_id = false;
@@ -270,8 +263,9 @@ static int extract_build_id(const uint8_t* file_data, size_t file_size,
 // Extract compiler string from .comment section
 static int extract_compiler(const uint8_t* file_data, size_t file_size,
                            const Elf64_Shdr* shdrs, uint32_t n_shdrs,
+                           const char* shstrtab,
                            char** compiler_out) {
-    const Elf64_Shdr* comment_shdr = find_section(".comment", shdrs, n_shdrs, "");
+    const Elf64_Shdr* comment_shdr = find_section(".comment", shdrs, n_shdrs, shstrtab);
     if (!comment_shdr || comment_shdr->sh_size == 0) {
         *compiler_out = NULL;
         return 0;
@@ -298,58 +292,43 @@ static int extract_compiler(const uint8_t* file_data, size_t file_size,
 
 // Main extraction function
 BinaryIntrinsic* bine_extract_intrinsic(const char* path) {
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) {
+    uint8_t* file_data = NULL;
+    size_t file_size = 0;
+    if (bine_read_file(path, &file_data, &file_size) < 0) {
         return NULL;
     }
-    
-    struct stat st;
-    if (fstat(fd, &st) < 0) {
-        close(fd);
-        return NULL;
-    }
-    
-    size_t file_size = st.st_size;
+
     if (file_size < sizeof(Elf64_Ehdr)) {
-        close(fd);
+        free(file_data);
         return NULL;
     }
-    
-    // Memory-map the file
-    uint8_t* file_data = (uint8_t*)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (file_data == MAP_FAILED) {
-        close(fd);
-        return NULL;
-    }
-    
-    close(fd);
-    
+
     // Verify ELF magic
     if (memcmp(file_data, ELFMAG, SELFMAG) != 0) {
-        munmap(file_data, file_size);
+        free(file_data);
         return NULL;
     }
-    
+
     bool le = is_little_endian(file_data);
     uint8_t elf_class = file_data[EI_CLASS];
-    
+
     if (elf_class != ELFCLASS64) {
-        munmap(file_data, file_size);
+        free(file_data);
         return NULL;
     }
-    
+
     // Parse ELF header
     const Elf64_Ehdr* ehdr = (const Elf64_Ehdr*)file_data;
-    
+
     BinaryIntrinsic* bin = (BinaryIntrinsic*)calloc(1, sizeof(BinaryIntrinsic));
     if (!bin) {
-        munmap(file_data, file_size);
+        free(file_data);
         return NULL;
     }
-    
+
     // Store path
     bin->path = strdup(path);
-    
+
     // Extract ELF header fields
     bin->e_machine = le ? read16_le((uint8_t*)&ehdr->e_machine) : read16_be((uint8_t*)&ehdr->e_machine);
     bin->e_entry = le ? read64_le((uint8_t*)&ehdr->e_entry) : read64_be((uint8_t*)&ehdr->e_entry);
@@ -402,7 +381,7 @@ BinaryIntrinsic* bine_extract_intrinsic(const char* path) {
     // Allocate and read section headers
     Elf64_Shdr* shdrs = (Elf64_Shdr*)malloc(shnum * sizeof(Elf64_Shdr));
     if (!shdrs) {
-        munmap(file_data, file_size);
+        free(file_data);
         bine_free_intrinsic(bin);
         return NULL;
     }
@@ -513,16 +492,16 @@ BinaryIntrinsic* bine_extract_intrinsic(const char* path) {
     }
     
     // Extract build ID
-    extract_build_id(file_data, file_size, shdrs, shnum, bin->build_id, &bin->has_build_id);
-    
+    extract_build_id(file_data, file_size, shdrs, shnum, shstrtab, bin->build_id, &bin->has_build_id);
+
     // Extract compiler string
-    extract_compiler(file_data, file_size, shdrs, shnum, &bin->compiler_str);
-    
+    extract_compiler(file_data, file_size, shdrs, shnum, shstrtab, &bin->compiler_str);
+
     // Calculate fingerprint from inode metadata
     bin->fingerprint = bine_get_fingerprint(path);
-    
+
     free(shdrs);
-    munmap(file_data, file_size);
+    free(file_data);
 
     return bin;
 }

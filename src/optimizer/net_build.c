@@ -3,12 +3,12 @@
 // Production-quality implementation: pure input-driven, no external lookups.
 
 #include "bine.h"
+#include "icor/bits.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <elf.h>
 
 // ============================================================================
 // Data Flow Graph Node
@@ -323,20 +323,16 @@ static DFGNode* build_dfg(const Instruction* insns, uint32_t n_insns,
 // ============================================================================
 
 // Classify each instruction into an agent type.
-// Production policy: unreachable code is safe to eliminate; all other
-// instructions are preserved conservatively.
+// Production policy:
+//   - Unreachable code (per the CFG seeded from entry, symbols and intra-.text
+//     relocations; see bine_analyze_reachability) is ERA (dead) and eligible
+//     for NOP-elimination by the serializer.
+//   - All other instructions are preserved conservatively.
 static AgentType classify_instruction(const DFGNode* dfg, uint32_t insn_idx,
                                       const Instruction* insn,
                                       const bool* reachable) {
     (void)dfg; // DFG analysis is intra-block only; too unsafe for DCE
     (void)insn_idx;
-    (void)reachable;
-
-    // CPU ELF reachability is intentionally not used for erasure. Real PIE and
-    // dynamically linked binaries enter most user code through indirect calls,
-    // PLT stubs, init arrays, and symbol-table roots that this local CFG cannot
-    // prove. Treating "not statically reached from e_entry" as dead code broke
-    // complex binaries by NOPing live functions.
 
     // Preserve all control-flow instructions.
     if (insn->is_branch || insn->is_call || insn->is_ret) {
@@ -346,6 +342,14 @@ static AgentType classify_instruction(const DFGNode* dfg, uint32_t insn_idx,
     // Constant loads are SIFT agents.
     if ((insn->opcode[0] >= 0xB8 && insn->opcode[0] <= 0xBF)) {
         return AGENT_SIFT;
+    }
+
+    // Unreachable code is safe to eliminate: the CFG roots include the entry
+    // point, every symbol address, and every intra-.text relocation target,
+    // so genuinely live entry points (init arrays, PLT stubs, indirect
+    // calls) are never classified as dead.
+    if (reachable && !reachable[insn_idx]) {
+        return AGENT_ERA;
     }
 
     // Everything else is conservative.
@@ -426,25 +430,28 @@ uint64_t* bine_build_net(const BinaryIntrinsic* bin, const StrandMasks* masks,
     for (uint32_t i = 0; i < n_insns; i++) {
         AgentType type = classify_instruction(dfg, i, &insns[i], reachable);
 
-        AgentPacked agent = {0};
-        agent.type = type;
-        agent.essential = (insns[i].is_call || insns[i].is_ret || insns[i].is_branch);
+        uint64_t word = SET_TYPE(0ULL, (uint64_t)type);
+
+        // Essential agents (CALL/RET/branch) can never be eliminated.
+        if (insns[i].is_call || insns[i].is_ret || insns[i].is_branch) {
+            word = SET_ESSENTIAL(word);
+        }
 
         if (type == AGENT_SIFT && insns[i].imm != 0) {
-            agent.port_0 = (uint32_t)insns[i].imm;
+            word = SET_PORT(word, 0, (uint32_t)insns[i].imm);
         } else if (dfg[i].def_reg != 0xFF) {
-            agent.port_0 = dfg[i].def_reg;
+            word = SET_PORT(word, 0, dfg[i].def_reg);
         }
 
         if (dfg[i].n_use_regs > 0) {
-            agent.port_1 = dfg[i].use_regs[0];
+            word = SET_PORT(word, 1, dfg[i].use_regs[0]);
         }
 
         if (dfg[i].n_consumers > 0 && dfg[i].consumers) {
-            agent.port_2 = dfg[i].consumers[0];
+            word = SET_PORT(word, 2, dfg[i].consumers[0]);
         }
 
-        net[i] = *(uint64_t*)&agent;
+        net[i] = word;
     }
 
     // Set root wire to entry point instruction

@@ -2,7 +2,6 @@
 // Adjusts relocation entries when .text section size changes during optimization.
 
 #include "bine.h"
-#include <elf.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
