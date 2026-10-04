@@ -127,7 +127,7 @@ static uint32_t decode_instruction(const uint8_t* bytes, uint64_t offset, uint64
                 insn->modrm = bytes[pos];
                 insn->use_regs[insn->n_use_regs++] = reg_out; // Source register
                 insn->rm = rm_out; // Destination (might be memory or register)
-                len += modrm_len + disp_size;
+                len += modrm_len;
             }
             break;
         
@@ -145,7 +145,7 @@ static uint32_t decode_instruction(const uint8_t* bytes, uint64_t offset, uint64
                 insn->modrm = bytes[pos];
                 insn->reg = reg_out; // Destination register
                 insn->use_regs[insn->n_use_regs++] = rm_out; // Source register
-                len += modrm_len + disp_size;
+                len += modrm_len;
             }
             break;
         
@@ -157,7 +157,7 @@ static uint32_t decode_instruction(const uint8_t* bytes, uint64_t offset, uint64
                 insn->modrm = bytes[pos];
                 insn->use_regs[insn->n_use_regs++] = reg_out; // Source register
                 insn->rm = rm_out; // Destination (might be memory or register)
-                len += modrm_len + disp_size;
+                len += modrm_len;
             }
             break;
         
@@ -169,7 +169,7 @@ static uint32_t decode_instruction(const uint8_t* bytes, uint64_t offset, uint64
                 insn->modrm = bytes[pos];
                 insn->reg = reg_out; // Destination register
                 insn->use_regs[insn->n_use_regs++] = rm_out; // Source register
-                len += modrm_len + disp_size;
+                len += modrm_len;
             }
             break;
         
@@ -182,7 +182,7 @@ static uint32_t decode_instruction(const uint8_t* bytes, uint64_t offset, uint64
                 insn->modrm = bytes[pos];
                 insn->use_regs[insn->n_use_regs++] = reg_out; // Source register
                 insn->use_regs[insn->n_use_regs++] = rm_out; // Destination register
-                len += modrm_len + disp_size;
+                len += modrm_len;
             }
             break;
         
@@ -194,7 +194,7 @@ static uint32_t decode_instruction(const uint8_t* bytes, uint64_t offset, uint64
                 insn->modrm = bytes[pos];
                 insn->use_regs[insn->n_use_regs++] = reg_out; // Source register
                 insn->use_regs[insn->n_use_regs++] = rm_out; // Destination register
-                len += modrm_len + disp_size;
+                len += modrm_len;
             }
             break;
         
@@ -205,7 +205,7 @@ static uint32_t decode_instruction(const uint8_t* bytes, uint64_t offset, uint64
                 uint32_t modrm_len = decode_modrm_sib(bytes, pos, rex, &reg_out, &rm_out, &disp_size);
                 insn->modrm = bytes[pos];
                 insn->reg = reg_out; // Destination register
-                len += modrm_len + disp_size;
+                len += modrm_len;
             }
             break;
         
@@ -221,7 +221,7 @@ static uint32_t decode_instruction(const uint8_t* bytes, uint64_t offset, uint64
                 } else if (reg_field == 1) { // DEC
                     insn->rm = rm_out; // Destination
                 }
-                len += modrm_len + disp_size;
+                len += modrm_len;
             }
             break;
         
@@ -299,7 +299,7 @@ static uint32_t decode_instruction(const uint8_t* bytes, uint64_t offset, uint64
                             uint8_t reg_out, rm_out, disp_size;
                             uint32_t modrm_len = decode_modrm_sib(bytes, pos, rex, &reg_out, &rm_out, &disp_size);
                             insn->modrm = bytes[pos];
-                            len += modrm_len + disp_size;
+                            len += modrm_len;
                         }
                         break;
                     
@@ -317,17 +317,17 @@ static uint32_t decode_instruction(const uint8_t* bytes, uint64_t offset, uint64
                     
                     case 0xB0: case 0xB1: case 0xB2: case 0xB3: // MOVZX
                     case 0xB4: case 0xB5: case 0xB6: case 0xB7:
-                        insn->has_modrm = true;
-                        {
-                            uint8_t reg_out, rm_out, disp_size;
-                            uint32_t modrm_len = decode_modrm_sib(bytes, pos, rex, &reg_out, &rm_out, &disp_size);
-                            insn->modrm = bytes[pos];
-                            insn->reg = reg_out;
-                            insn->rm = rm_out;
-                            len += modrm_len + disp_size;
-                        }
-                        break;
-                    
+                            insn->has_modrm = true;
+                            {
+                                uint8_t reg_out, rm_out, disp_size;
+                                uint32_t modrm_len = decode_modrm_sib(bytes, pos, rex, &reg_out, &rm_out, &disp_size);
+                                insn->modrm = bytes[pos];
+                                insn->reg = reg_out;
+                                insn->rm = rm_out;
+                                len += modrm_len;
+                            }
+                            break;
+                        
                     case 0xAF: // IMUL r, r/m
                         insn->has_modrm = true;
                         {
@@ -336,7 +336,7 @@ static uint32_t decode_instruction(const uint8_t* bytes, uint64_t offset, uint64
                             insn->modrm = bytes[pos];
                             insn->reg = reg_out;
                             insn->rm = rm_out;
-                            len += modrm_len + disp_size;
+                            len += modrm_len;
                         }
                         break;
                     
@@ -346,7 +346,7 @@ static uint32_t decode_instruction(const uint8_t* bytes, uint64_t offset, uint64
                             uint8_t reg_out, rm_out, disp_size;
                             uint32_t modrm_len = decode_modrm_sib(bytes, pos, rex, &reg_out, &rm_out, &disp_size);
                             insn->modrm = bytes[pos];
-                            len += modrm_len + disp_size;
+                            len += modrm_len;
                         }
                         break;
                 }
